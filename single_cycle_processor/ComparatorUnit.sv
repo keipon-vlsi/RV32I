@@ -14,8 +14,8 @@ module ComparatorUnit #(parameter XLEN= 32)
             OP_BNE:  comp_o = comp_port_a_i != comp_port_b_i;
             OP_BLTU: comp_o = comp_port_a_i < comp_port_b_i;
             OP_BGEU: comp_o = comp_port_a_i >= comp_port_b_i;
-            OP_BLT:  comp_o = $signed(comp_port_a_i) < $singed(comp_port_b_i);
-            OP_BGE:  comp_o = $sigend(comp_port_a_i) >= $singed(comp_port_b_i);
+            OP_BLT:  comp_o = $signed(comp_port_a_i) < $signed(comp_port_b_i);
+            OP_BGE:  comp_o = $signed(comp_port_a_i) >= $signed(comp_port_b_i);
             OP_BUNKNOWN: comp_o = 1'b0;
         endcase
     end
