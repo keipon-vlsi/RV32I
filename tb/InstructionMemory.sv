@@ -8,12 +8,12 @@ module InstructionMemory
 
     initial
     begin
-        $readmesh("L_S_type.txt", instruction);
+        $readmemh("L_S_type.txt", instruction);
     end
 
     always_comb
     begin
-        assign instruction_data_o = instruction[instruction_address_i[31:2]];
+        instruction_data_o = instruction[instruction_address_i[31:2]];
     end
 
 endmodule
