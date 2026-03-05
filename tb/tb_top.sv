@@ -2,94 +2,120 @@
 
 module tb_top;
 
-    // ========================================================================
-    // 1. Signal Declarations
-    // ========================================================================
+    // --- 1. 信号宣言 ---
     logic clk;
     logic reset;
-    logic [31:0] write_data;
-    logic [31:0] data_address;
-    logic write_enable;
+    
+    logic [31:0] write_data_obs;
+    logic [31:0] data_address_obs;
+    logic write_enable_obs;
 
-    // ========================================================================
-    // 2. DUT (Device Under Test) Instantiation
-    // ========================================================================
+    // --- 2. DUT (Device Under Test) のインスタンス化 ---
     top u_top (
         .clk(clk),
         .reset(reset),
-        .write_data(write_data),
-        .data_address(data_address),
-        .write_enable(write_enable)
+        .write_data(write_data_obs),
+        .data_address(data_address_obs),
+        .write_enable(write_enable_obs)
     );
 
-    // ========================================================================
-    // 3. Clock Generation
-    // ========================================================================
+    // --- 3. クロック生成 ---
+    always #5 clk = ~clk;
+
+    // --- 4. 命令メモリの読み込み ---
     initial begin
-        clk = 0;
-        // Generate 100MHz clock (10ns period)
-        forever #5 clk = ~clk;
+        // テストしたいHexファイル名に書き換えてください（例: all_test.hex）
+        $readmemh("all_test.hex", u_top.imem.instruction); 
     end
 
-    // ========================================================================
-    // 4. Test Scenario
-    // ========================================================================
+    // --- 5. データムーブメント・モニタ (Tracer) ---
+    // レジスタやメモリへの書き込みを毎クロック監視し、変化があった時だけログを出力します。
+    // ※内部配列名に依存しないため、Unable to bindエラーは起きません！
+    
+    logic [31:0] pc_obs;
+    logic [31:0] instr_obs;
+    logic        reg_we_obs;
+    logic [4:0]  rd_addr_obs;
+    logic [31:0] reg_wdata_obs;
+
+    // ProcessorCore内部の信号をアサイン
+    assign pc_obs        = u_top.PrCore.PC;
+    assign instr_obs     = u_top.PrCore.instruction;
+    assign reg_we_obs    = u_top.PrCore.reg_write_enable;
+    assign rd_addr_obs   = instr_obs[11:7]; // rd
+    assign reg_wdata_obs = u_top.PrCore.reg_data;
+
+    always @(negedge clk) begin
+        if (!reset) begin
+            // レジスタへの書き込み監視 (x0 への書き込みは無視)
+            if (reg_we_obs && rd_addr_obs != 5'd0) begin
+                $display("Time: %0t | PC: %h | Instr: %h | REG WRITE: x%0d <= %h", 
+                         $time, pc_obs, instr_obs, rd_addr_obs, reg_wdata_obs);
+            end
+            
+            // データメモリへの書き込み監視
+            if (write_enable_obs) begin
+                $display("Time: %0t | PC: %h | Instr: %h | MEM WRITE: Addr[%h] <= %h", 
+                         $time, pc_obs, instr_obs, data_address_obs, write_data_obs);
+            end
+        end
+    end
+
+    // --- 6. メインテストシーケンス ---
     initial begin
-        // Print header for the log
-        $display("----------------------------------------------------------------------------------");
-        $display("Time  | PC       | Instr    | Action");
-        $display("----------------------------------------------------------------------------------");
-
-        // --- Simulation Start ---
+        clk = 0;
         reset = 1;
-        #20;       // Hold reset for 20ns
-        reset = 0; // Release reset
+        #20;
+        reset = 0;
 
-        // Run simulation for enough time to execute the program
-        #1000;
+        $display("==================================================");
+        $display(" Starting RV32I Full Instruction Verification");
+        $display("==================================================");
 
-        // --- Simulation End ---
-        $display("----------------------------------------------------------------------------------");
-        $display("Simulation Finished");
+        // プログラムの終了検知 (例: 無限ループ beq x0, x0, 0 を検知)
+        // ※ PC が変化しなくなったら終了とみなす
+        begin : check_loop
+                    forever begin
+                        @(posedge clk);
+                        if (u_top.PrCore.PC === u_top.PrCore.pc_next) begin
+                            $display("\n[INFO] End of program detected (Infinite Loop).");
+                            disable check_loop; // 指定した名前のブロックから強制的に抜ける（breakと同じ動作）
+                        end
+                    end
+                end
+
+        #10; // 最後の書き込みを待つ
+        
+        // --- 7. 最終レジスタ・ダンプ ---
+        // テスト終了時に、x1 から x31 までの最終結果を一覧表示します。
+        // ここで期待値と見比べることで、全命令が正しく動いたか一目で確認できます。
+        $display("==================================================");
+        $display(" Final Register State Dump");
+        $display("==================================================");
+        
+        // ※ここは手動で内部配列を覗く必要があります。
+        // u_top.PrCore.regfile の下の配列名を、ご自身の環境（mem, regs, registers など）に合わせてください。
+        // どうしてもエラーになる場合は、この for ループ部分だけコメントアウトしてください。
+        for (int i = 1; i < 32; i++) begin
+            // ▼▼▼ 注: 'registers' を正しい名前に書き換えてください ▼▼▼
+            $display(" x%0d \t: %h", i, u_top.PrCore.regfile.register[i]);
+        end
+        $display("==================================================");
+
         $finish;
     end
 
-    // ========================================================================
-    // 5. Monitoring Logic (Hierarchical Access)
-    // ========================================================================
-    // Monitor signals at the negative edge of the clock to ensure stability.
-    always @(negedge clk) begin
-        if (!reset) begin
-            // Basic Info: Time, Current PC, and Current Instruction
-            // Using hierarchical reference "u_top.PrCore.xxx" to access internal signals.
-            $write("%5t | %h | %h | ", $time, u_top.PrCore.PC, u_top.PrCore.instruction);
+    // --- タイムアウト ---
+    initial begin
+        #50000; // テストが巨大な場合はこの数値を増やしてください
+        $display("\n[TIMEOUT] Simulation time limit exceeded.");
+        $finish;
+    end
 
-            // --- Case 1: Register Write (ALU Ops, Load, JAL/JALR) ---
-            // Check if register write is enabled AND the destination register is not x0.
-            if (u_top.PrCore.reg_write_enable && (u_top.PrCore.instruction[11:7] != 0)) begin
-                $display("REG WRITE: x%0d <= %h", 
-                         u_top.PrCore.instruction[11:7], // rd (destination register index)
-                         u_top.PrCore.reg_data           // data to be written
-                );
-            end
-            
-            // --- Case 2: Memory Write (Store) ---
-            // This uses the top-level output signal.
-            else if (write_enable) begin
-                $display("MEM WRITE: Mem[%h] <= %h", data_address, write_data);
-            end
-
-            // --- Case 3: Branch/Jump Taken ---
-            // If pc_mux_sel is high, PC is updated from ALU output (Jump target).
-            else if (u_top.PrCore.pc_mux_sel) begin
-                 $display("BRANCH/JUMP: To %h", u_top.PrCore.alu_output);
-            end
-
-            // --- Case 4: No major architectural state change (NOP, Branch not taken) ---
-            else begin
-                $display(" - ");
-            end
-        end
+    // --- 波形出力 ---
+    initial begin
+        $dumpfile("rv32i_full.vcd");
+        $dumpvars(0, tb_top);
     end
 
 endmodule

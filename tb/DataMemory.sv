@@ -7,16 +7,16 @@ module DataMemory
     input  logic [31:0] address_i
 );
 
-    logic [31:0] data [63:0];
+    logic [31:0] data [0:63];
 
-    initial
-    begin
-        $readmemh("Data_Memory_Load.txt", data);
-    end
+    // initial
+    // begin
+    //     $readmemh("Data_Memory_Load.txt", data);
+    // end
 
     always_comb
     begin
-        read_data_o = data[address_i[31:0]];
+        read_data_o = data[address_i[31:2]];
     end
 
     always_ff @(posedge clk_i)
